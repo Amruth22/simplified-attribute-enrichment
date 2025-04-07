@@ -3,6 +3,8 @@ External services integration for the Simplified Attribute Enrichment service
 """
 import asyncio
 import logging
+import json
+import re
 from typing import Dict, List, Any, Optional
 
 from google import genai
@@ -34,6 +36,11 @@ async def generate_gemini_response(prompt: str, request_id: Optional[str] = None
         # Count tokens in the input prompt
         input_tokens = count_tokens(prompt)
         logger.info(f"{debug_prefix}Input prompt has {input_tokens} tokens")
+
+        # Check if we should use mock implementation
+        if settings.MOCK_GEMINI_API:
+            logger.info(f"{debug_prefix}Using mock Gemini API implementation")
+            return await mock_gemini_response(prompt, request_id)
 
         # Check if API key is configured
         if not settings.GOOGLE_API_KEY:
@@ -162,6 +169,72 @@ async def generate_gemini_response(prompt: str, request_id: Optional[str] = None
                 }
             }
         }
+
+async def mock_gemini_response(prompt: str, request_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Generate a mock response for testing without calling the actual Gemini API
+    
+    Args:
+        prompt: The prompt text
+        request_id: Request ID for logging
+        
+    Returns:
+        dict: Mock response data
+    """
+    debug_prefix = get_debug_prefix(request_id)
+    logger.info(f"{debug_prefix}Generating mock Gemini response")
+    
+    # Count tokens
+    input_tokens = count_tokens(prompt)
+    
+    # Extract MPN and attributes from prompt
+    mpn_match = re.search(r'PRODUCT MPN: ([^\n]+)', prompt)
+    mpn = mpn_match.group(1) if mpn_match else "Unknown"
+    
+    attributes_match = re.search(r'ATTRIBUTES TO EXTRACT: ([^\n]+)', prompt)
+    attributes_str = attributes_match.group(1) if attributes_match else ""
+    
+    # Parse attributes
+    attributes = [attr.strip() for attr in attributes_str.split(',') if attr.strip()]
+    
+    # Generate mock response
+    response_obj = {}
+    for attr in attributes:
+        response_obj[attr] = f"Mock {attr} for {mpn}"
+    
+    # Add some common attributes if none specified
+    if not attributes:
+        response_obj = {
+            "Material": f"Mock Material for {mpn}",
+            "Width": "10 inches",
+            "Height": "5 inches",
+            "Weight": "2.5 kg",
+            "Color": "Black"
+        }
+    
+    # Convert to JSON
+    response_text = json.dumps(response_obj, indent=2)
+    
+    # Simulate processing delay
+    await asyncio.sleep(1)
+    
+    # Count output tokens
+    output_tokens = count_tokens(response_text)
+    
+    # Calculate costs
+    costs = calculate_token_costs(input_tokens, output_tokens)
+    
+    logger.info(f"{debug_prefix}Generated mock response with {len(response_obj)} attributes")
+    
+    return {
+        "text": response_text,
+        "tokens": {
+            "input": input_tokens,
+            "output": output_tokens,
+            "total": input_tokens + output_tokens
+        },
+        "costs": costs
+    }
 
 # -------------------- Google Search Service --------------------
 
