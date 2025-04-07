@@ -82,6 +82,7 @@ async def enrich_product_data(
 
     # Get the appropriate template
     template = get_template(category or "Electrical")
+    logger.info(f"{debug_prefix}Using template: {template.__class__.__name__}")
 
     # Get attribute list from taxonomy (implementation omitted for brevity)
     # In a real implementation, this would load from the taxonomy file
@@ -90,6 +91,12 @@ async def enrich_product_data(
     # Use provided attributes or fall back to taxonomy
     final_attributes_to_extract = attributes_to_extract or attr_list_from_taxonomy
     response["requested_attributes"] = final_attributes_to_extract
+    
+    # DEBUG: Log the attributes to extract
+    if final_attributes_to_extract:
+        logger.info(f"{debug_prefix}Will extract these attributes: {final_attributes_to_extract}")
+    else:
+        logger.warning(f"{debug_prefix}No attributes specified for extraction!")
 
     # Set up tasks for concurrent execution
     tasks = []
@@ -110,19 +117,28 @@ async def enrich_product_data(
 
         # Generate the prompt using the template
         prompt = template.generate_prompt(data_row, final_attributes_to_extract)
-        logger.info(f"{debug_prefix}Generated prompt using {template.__class__.__name__}")
+        logger.info(f"{debug_prefix}Generated prompt using {template.__class__.__name__} ({len(prompt)} chars)")
+        
+        # DEBUG: Log a snippet of the prompt
+        prompt_snippet = prompt[:100] + "..." if len(prompt) > 100 else prompt
+        logger.info(f"{debug_prefix}Prompt snippet: {prompt_snippet}")
 
         # Generate response from Gemini
+        logger.info(f"{debug_prefix}Sending prompt to Gemini API")
         attribute_task = generate_gemini_response(prompt, request_id)
         tasks.append(("attribute_extraction", attribute_task))
+    else:
+        logger.warning(f"{debug_prefix}Skipping attribute extraction - no attributes specified")
 
     # Execute all tasks concurrently
     if tasks:
         results = {}
         for name, task in tasks:
             try:
+                logger.info(f"{debug_prefix}Awaiting task: {name}")
                 result = await task
                 results[name] = result
+                logger.info(f"{debug_prefix}Completed task: {name}")
             except Exception as e:
                 logger.error(f"{debug_prefix}Error in {name} task: {str(e)}")
                 results[name] = None
@@ -144,12 +160,16 @@ async def enrich_product_data(
         # Process attribute extraction results
         if "attribute_extraction" in results and results["attribute_extraction"]:
             response_data = results["attribute_extraction"]
+            logger.info(f"{debug_prefix}Received attribute extraction response")
 
             # Store token information in the response
             response["token_data"]["input_tokens"] = response_data["tokens"]["input"]
             response["token_data"]["output_tokens"] = response_data["tokens"]["output"]
             response["token_data"]["total_tokens"] = response_data["tokens"]["input"] + response_data["tokens"]["output"]
             response["token_data"]["cost_inr"] = response_data["costs"]["inr"]["total"]
+            
+            # DEBUG: Log token information
+            logger.info(f"{debug_prefix}Token usage - Input: {response_data['tokens']['input']}, Output: {response_data['tokens']['output']}")
 
             # Update global token stats if enabled
             if settings.ENABLE_TOKEN_TRACKING:
@@ -161,11 +181,19 @@ async def enrich_product_data(
 
             # Store the raw response from Gemini
             response["raw_gemini_response"] = response_data["text"]
+            
+            # DEBUG: Log a snippet of the raw response
+            raw_text = response_data["text"]
+            text_snippet = raw_text[:100] + "..." if len(raw_text) > 100 else raw_text
+            logger.info(f"{debug_prefix}Raw response snippet: {text_snippet}")
 
             # Extract JSON data from response
+            logger.info(f"{debug_prefix}Extracting JSON from response")
             attribute_data = await extract_json_from_response(response_data, request_id)
 
             if attribute_data:
+                logger.info(f"{debug_prefix}Successfully extracted JSON with {len(attribute_data)} attributes")
+                
                 # Filter attributes to only include requested ones if provided
                 if final_attributes_to_extract:
                     filtered_attributes = {}
@@ -180,6 +208,9 @@ async def enrich_product_data(
                 # Set confidence based on number of attributes extracted
                 expected_attrs = len(final_attributes_to_extract)
                 actual_attrs = len(response["attributes"])
+                
+                # DEBUG: Log attribute extraction results
+                logger.info(f"{debug_prefix}Extracted {actual_attrs}/{expected_attrs} requested attributes")
 
                 if expected_attrs > 0:
                     ratio = actual_attrs / expected_attrs
@@ -191,6 +222,10 @@ async def enrich_product_data(
                         response["confidence"] = "LOW"
                 elif actual_attrs > 5:
                     response["confidence"] = "MEDIUM"
+            else:
+                logger.warning(f"{debug_prefix}Failed to extract JSON data from response")
+        else:
+            logger.warning(f"{debug_prefix}No attribute extraction results available")
 
     # Calculate processing time
     processing_time = time.time() - start_time
@@ -265,6 +300,11 @@ async def process_bulk_file(
             if 'attributes_to_extract' in row and pd.notna(row['attributes_to_extract']):
                 attributes_str = str(row['attributes_to_extract'])
                 attributes_to_extract = [attr.strip() for attr in attributes_str.split(',')]
+                logger.info(f"[{task_id}-row{idx}] Found attributes to extract: {attributes_to_extract}")
+            else:
+                logger.warning(f"[{task_id}-row{idx}] No 'attributes_to_extract' column found or value is empty")
+                # DEBUG: Print all available columns
+                logger.info(f"[{task_id}-row{idx}] Available columns: {list(row.index)}")
 
             # Create the enrichment task
             task = enrich_product_data(
@@ -313,13 +353,19 @@ async def process_bulk_file(
                     output_df.at[idx, 'cost_inr'] = result["token_data"]["cost_inr"]
 
                 # Store attributes as JSON
-                output_df.at[idx, 'attributes_json'] = json.dumps(result.get("attributes", {}))
+                attributes = result.get("attributes", {})
+                if attributes:
+                    logger.info(f"[{task_id}] Row {idx} has {len(attributes)} attributes")
+                else:
+                    logger.warning(f"[{task_id}] Row {idx} has no attributes")
+                
+                output_df.at[idx, 'attributes_json'] = json.dumps(attributes)
                 output_df.at[idx, 'confidence'] = result.get("confidence", "LOW")
                 output_df.at[idx, 'processing_time'] = result.get("processing_time_seconds", 0)
 
                 # Store individual attributes if they exist
                 requested_attrs = result.get("requested_attributes", [])
-                for key, value in result.get("attributes", {}).items():
+                for key, value in attributes.items():
                     # Only process attributes that were in the requested list
                     if not requested_attrs or key in requested_attrs:
                         # Create column if it doesn't exist
