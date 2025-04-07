@@ -1,0 +1,5 @@
+mfg_part_number,manufacturer_name,category_gen,sub_category_gen,attributes_to_extract
+LH0365,H&M DISTRIBUTOR,Electrical,Lighting,"Material,Width,Height,Voltage,Color"
+LENS 2X4 FROSTED ACRYLIC,OHIO LENS,Electrical,Lighting,"Material,Dimensions,Thickness,Light Transmission"
+805-52793 INPUT CABLE/END PLUG KIT,I2SYSTEMS,Electrical,Cables,"Material,Length,Connector Type,Voltage Rating"
+ICN2S5490CT35I,SIGNIFY,Electrical,Ballasts,"Input Voltage,Output Current,Ballast Factor,THD"
