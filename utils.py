@@ -52,30 +52,81 @@ async def extract_json_from_response(response_data: Dict[str, Any], request_id: 
         # Get the text from the response
         text = response_data.get("text", "")
         
+        if not text:
+            logger.warning(f"{debug_prefix}Empty response text")
+            return {}
+            
+        logger.info(f"{debug_prefix}Attempting to extract JSON from response ({len(text)} chars)")
+        
         # Try to parse the entire response as JSON first
         try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            logger.info(f"{debug_prefix}Response is not a valid JSON object, trying to extract JSON")
+            logger.info(f"{debug_prefix}Trying to parse entire response as JSON")
+            json_data = json.loads(text)
+            logger.info(f"{debug_prefix}Successfully parsed entire response as JSON")
+            return json_data
+        except json.JSONDecodeError as e:
+            logger.info(f"{debug_prefix}Response is not a valid JSON object: {str(e)}")
         
         # Try to extract JSON using regex pattern
+        logger.info(f"{debug_prefix}Trying to extract JSON using regex")
         json_pattern = r'({[\s\S]*})'
         match = re.search(json_pattern, text)
         
         if match:
             json_str = match.group(1)
+            logger.info(f"{debug_prefix}Found potential JSON string ({len(json_str)} chars)")
             try:
-                return json.loads(json_str)
-            except json.JSONDecodeError:
-                logger.warning(f"{debug_prefix}Extracted text is not valid JSON")
+                json_data = json.loads(json_str)
+                logger.info(f"{debug_prefix}Successfully parsed extracted JSON")
+                return json_data
+            except json.JSONDecodeError as e:
+                logger.warning(f"{debug_prefix}Extracted text is not valid JSON: {str(e)}")
+                
+                # Try to fix common JSON issues
+                logger.info(f"{debug_prefix}Attempting to fix JSON formatting issues")
+                fixed_json_str = fix_json_formatting(json_str)
+                try:
+                    json_data = json.loads(fixed_json_str)
+                    logger.info(f"{debug_prefix}Successfully parsed fixed JSON")
+                    return json_data
+                except json.JSONDecodeError as e:
+                    logger.warning(f"{debug_prefix}Fixed JSON is still invalid: {str(e)}")
+        else:
+            logger.warning(f"{debug_prefix}No JSON-like structure found in response")
         
         # If we get here, we couldn't extract valid JSON
-        logger.warning(f"{debug_prefix}Could not extract valid JSON from response")
+        # Log a snippet of the response for debugging
+        text_snippet = text[:200] + "..." if len(text) > 200 else text
+        logger.warning(f"{debug_prefix}Could not extract valid JSON from response. Text snippet: {text_snippet}")
         return {}
         
     except Exception as e:
         logger.error(f"{debug_prefix}Error extracting JSON: {str(e)}")
         return {}
+
+def fix_json_formatting(json_str: str) -> str:
+    """
+    Attempt to fix common JSON formatting issues
+    
+    Args:
+        json_str: JSON string to fix
+        
+    Returns:
+        str: Fixed JSON string
+    """
+    # Replace single quotes with double quotes
+    fixed = json_str.replace("'", '"')
+    
+    # Fix trailing commas in objects
+    fixed = re.sub(r',\s*}', '}', fixed)
+    
+    # Fix trailing commas in arrays
+    fixed = re.sub(r',\s*]', ']', fixed)
+    
+    # Ensure property names are double-quoted
+    fixed = re.sub(r'([{,]\s*)([a-zA-Z0-9_]+)(\s*:)', r'\1"\2"\3', fixed)
+    
+    return fixed
 
 # -------------------- Token Utilities --------------------
 
