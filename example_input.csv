@@ -1,0 +1,5 @@
+mfg_part_number,manufacturer_name,category_gen,sub_category_gen,attributes_to_extract
+ABC123,Example Corp,Electrical,Switches,"Material,Width,Height,Voltage,Color"
+DEF456,Another Mfg,HVAC,Filters,"Material,Dimensions,MERV Rating,Efficiency"
+GHI789,Cool Tech,Refrigeration,Compressors,"Material,Capacity,Refrigerant Type,Power"
+JKL012,Plumb Co,Plumbing,Valves,"Material,Connection Type,Pressure Rating,Temperature Rating"
